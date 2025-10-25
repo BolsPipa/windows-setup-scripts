@@ -1,15 +1,10 @@
 # ============================================
-# install_apps.ps1 – Programme automatisch installieren (Setup-kompatibel)
+# install_apps.ps1 – Programme automatisch installieren (stabil + Setup-kompatibel)
 # ============================================
 
 Write-Host "Starte Software-Installation..." -ForegroundColor Cyan
 
-# Sicherheitsprotokoll für GitHub/HTTPS
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-# Deaktiviert Microsoft Store als Quelle (verhindert Interaktivität)
-try {
-    winget source remove msstore -y *> $null 2>&1
-} catch {}
 
 # --- Einstellungen ---
 $UseSilent = $false
@@ -28,13 +23,25 @@ function Log {
     if ($CreateLog) { $Text | Out-File -FilePath $LogFile -Encoding utf8 -Append }
 }
 
-# Pruefen ob Winget verfügbar ist
+# --- Winget initialisieren ---
+Log "Initialisiere Winget-Datenbank..."
+try {
+    winget source remove msstore -y *> $null 2>&1
+    winget source update *> $null 2>&1
+    $null = winget list 2>$null
+    Log "Winget-Datenbank initialisiert."
+}
+catch {
+    Log "⚠️ Fehler bei Winget-Initialisierung: $_"
+}
+
+# --- Prüfen, ob Winget vorhanden ist ---
 if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-    Log "Winget ist nicht verfuegbar. Stelle sicher, dass 'App Installer' installiert ist."
+    Log "❌ Winget ist nicht verfügbar. Stelle sicher, dass 'App Installer' installiert ist."
     exit 1
 }
 
-# Admin-Check (optional – im Setup meist schon Admin)
+# --- Adminrechte prüfen (optional) ---
 function Test-IsAdministrator {
     $id = [Security.Principal.WindowsIdentity]::GetCurrent()
     $p = New-Object Security.Principal.WindowsPrincipal($id)
@@ -42,7 +49,7 @@ function Test-IsAdministrator {
 }
 
 if (-not (Test-IsAdministrator)) {
-    Log "Script lauft nicht als Administrator. Versuche Neustart..."
+    Log "⚠️ Script läuft nicht als Administrator. Versuche Neustart..."
     $arg = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""
     Start-Process -FilePath "powershell" -ArgumentList $arg -Verb RunAs -WindowStyle Normal
     exit 0
@@ -50,25 +57,33 @@ if (-not (Test-IsAdministrator)) {
 
 $results = @()
 
-# --- Hauptfunktion: App installieren ---
+# --- App-Installation ---
 function Install-App {
     param ([string]$Name, [string]$PackageID)
 
-    Log "=> Pruefe $Name (ID: $PackageID)..."
+    Log "=> Prüfe $Name (ID: $PackageID)..."
 
-    # Paket in Winget suchen
-    & winget show --id $PackageID --exact *> $null 2>&1
-    if ($LASTEXITCODE -ne 0) {
+    # Timeout für 'winget show'
+    $proc = Start-Process -FilePath "winget" -ArgumentList @("show","--id",$PackageID,"--exact") -PassThru -WindowStyle Hidden
+    if (-not $proc.WaitForExit(30*1000)) {
+        $proc.Kill()
+        Log "⚠️ Winget-Anfrage für $Name hat zu lange gedauert – überspringe."
+        $results += [pscustomobject]@{Name=$Name;Status="Timeout";Message="Winget-Show hing zu lange."}
+        return
+    }
+
+    # Paketprüfung
+    if ($proc.ExitCode -ne 0) {
         $msg = "❌ Paket $PackageID wurde in Winget nicht gefunden."
         Log $msg
         $results += [pscustomobject]@{Name=$Name;Status="NotFound";Message=$msg}
         return
     }
 
-    # Prüfen, ob bereits installiert
+    # Prüfen ob installiert
     $list = & winget list --id $PackageID --exact 2>$null
     if ($list -and ($list -notmatch "No installed package found")) {
-        $msg = "⚙️  $Name ist bereits installiert. Ueberspringe..."
+        $msg = "⚙️  $Name ist bereits installiert. Überspringe..."
         Log $msg
         $results += [pscustomobject]@{Name=$Name;Status="AlreadyInstalled";Message=$msg}
         return
@@ -78,15 +93,22 @@ function Install-App {
     $args = @("install","--id",$PackageID,"--accept-package-agreements","--accept-source-agreements","--exact")
     if ($UseSilent) { $args += "--silent" }
 
-    & winget @args
-    if ($LASTEXITCODE -eq 0) {
+    $proc = Start-Process -FilePath "winget" -ArgumentList $args -PassThru -WindowStyle Hidden
+    if (-not $proc.WaitForExit(600*1000)) { # 10 Minuten Timeout
+        $proc.Kill()
+        Log "⚠️ Installation von $Name hat zu lange gedauert – abgebrochen."
+        $results += [pscustomobject]@{Name=$Name;Status="Timeout";Message="Installation zu lange gedauert."}
+        return
+    }
+
+    if ($proc.ExitCode -eq 0) {
         $msg = "✅ $Name erfolgreich installiert."
         Log $msg
         $results += [pscustomobject]@{Name=$Name;Status="Installed";Message=$msg}
     } else {
-        $msg = "❗ Fehler bei $Name (ExitCode=$LASTEXITCODE)."
+        $msg = "❗ Fehler bei $Name (ExitCode=$($proc.ExitCode))."
         Log $msg
-        $results += [pscustomobject]@{Name=$Name;Status="Failed";Message=$msg;ExitCode=$LASTEXITCODE}
+        $results += [pscustomobject]@{Name=$Name;Status="Failed";Message=$msg;ExitCode=$proc.ExitCode}
     }
 }
 
@@ -100,7 +122,7 @@ $apps = @(
     @{Name="Visual Studio 2022 Community"; ID="Microsoft.VisualStudio.2022.Community"}
 )
 
-# --- Installation starten ---
+# --- Hauptlauf ---
 foreach ($app in $apps) {
     try {
         Install-App -Name $app.Name -PackageID $app.ID
@@ -119,5 +141,5 @@ if ($CreateLog) {
     Log "📄 Log-Datei gespeichert unter: $LogFile"
 }
 
-Log "✅ Fertig. Bitte Ausgabe oder Log pruefen."
-Start-Sleep -Seconds 2
+Log "✅ Fertig. Bitte Ausgabe oder Log prüfen."
+Start-Sleep -Seconds 3
