@@ -18,7 +18,7 @@ $LogFile = Join-Path $LogDir 'install.log'
 
 if ($CreateLog) {
     if (-not (Test-Path $LogDir)) { New-Item -Path $LogDir -ItemType Directory -Force | Out-Null }
-    '`n==== Installation gestartet: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') ====' | Out-File -FilePath $LogFile -Encoding utf8 -Append
+    '`n==== Installation gestartet: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss") ====' | Out-File -FilePath $LogFile -Encoding utf8 -Append
 }
 
 function Log {
@@ -157,7 +157,7 @@ Log '`n=== Zusammenfassung ==='
 $results | Format-Table -AutoSize | Out-String | ForEach-Object { Log $_ }
 
 if ($CreateLog) {
-    '`n==== Installation beendet: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') ====`n' | Out-File -FilePath $LogFile -Encoding utf8 -Append
+    '`n==== Installation beendet: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss") ====`n' | Out-File -FilePath $LogFile -Encoding utf8 -Append
     Log 'Log-Datei gespeichert unter: $LogFile'
 }
 
