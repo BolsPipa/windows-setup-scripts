@@ -1,107 +1,165 @@
-# Windows 11 Konfigurations-Script
-# Läuft automatisch direkt nach der Installation (KEIN Internet nötig)
+# ============================================
+# install_apps.ps1 – Automatische Installation (stabil + Setup-kompatibel)
+# Änderungen:
+# - Lokalisierungsunabhängige Prüfung, ob ein Paket bereits installiert ist
+# - Klarere Fehler-/Output-Redirection in Winget-Init-Job
+# - Sicherer Relaunch als Administrator (Fallback, wenn $PSCommandPath leer ist)
+# - Kleinere Robustheitsverbesserungen
+# ============================================
 
-# Protokoll-Datei
-$logFile = "C:\Windows\Temp\config-script.log"
-function Write-Log {
-    param($Message)
-    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    "$timestamp - $Message" | Out-File -FilePath $logFile -Append
-    Write-Host $Message
+Write-Host "Starte Software-Installation..." -ForegroundColor Cyan
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+# --- Einstellungen ---
+$UseSilent = $false
+$CreateLog = $true
+$LogDir = "C:\Windows\Setup\Logs"
+$LogFile = Join-Path $LogDir "install.log"
+
+if ($CreateLog) {
+    if (-not (Test-Path $LogDir)) { New-Item -Path $LogDir -ItemType Directory -Force | Out-Null }
+    "`n==== Installation gestartet: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') ====" | Out-File -FilePath $LogFile -Encoding utf8 -Append
 }
 
-Write-Log "=== Windows Konfiguration gestartet ==="
+function Log {
+    param([string]$Text)
+    Write-Host $Text
+    if ($CreateLog) { $Text | Out-File -FilePath $LogFile -Encoding utf8 -Append }
+}
 
-# ===== WINDOWS EINSTELLUNGEN =====
-
-# Dark Mode aktivieren
-Write-Log "Aktiviere Dark Mode..."
+# --- Winget-Initialisierung (nicht-blockierend) ---
+Log "Initialisiere Winget-Datenbank (nicht-blockierend)..."
 try {
-    New-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "AppsUseLightTheme" -Value 0 -PropertyType DWORD -Force | Out-Null
-    New-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "SystemUsesLightTheme" -Value 0 -PropertyType DWORD -Force | Out-Null
-    Write-Log "✓ Dark Mode aktiviert"
+    # Store-Quelle entfernen, damit keine Lizenzabfrage kommt
+    Start-Job -ScriptBlock {
+        try {
+            # 2>$null ist kompatibler zu PowerShell 5.1 und PowerShell 7
+            winget source remove msstore -y 2>$null
+            winget source reset --force 2>$null
+            winget source update 2>$null
+        } catch {}
+    } | Out-Null
+    Start-Sleep -Seconds 5
+    Log "Winget-Initialisierung im Hintergrund gestartet."
 } catch {
-    Write-Log "✗ Fehler beim Aktivieren des Dark Mode"
+    Log "Fehler bei Winget-Initialisierung: $_"
 }
 
-# Dateierweiterungen anzeigen
-Write-Log "Zeige Dateierweiterungen..."
-try {
-    Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "HideFileExt" -Value 0
-    Write-Log "✓ Dateierweiterungen werden angezeigt"
-} catch {
-    Write-Log "✗ Fehler beim Ändern der Dateierweiterungen"
+# --- Prüfen ob Winget verfügbar ---
+if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+    Log "Winget ist nicht verfügbar. Stelle sicher, dass 'App Installer' installiert ist."
+    exit 1
 }
 
-# Versteckte Dateien anzeigen
-Write-Log "Zeige versteckte Dateien..."
-try {
-    Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "Hidden" -Value 1
-    Write-Log "✓ Versteckte Dateien werden angezeigt"
-} catch {
-    Write-Log "✗ Fehler beim Ändern der versteckten Dateien"
+# --- Adminrechte prüfen ---
+function Test-IsAdministrator {
+    $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $p = New-Object Security.Principal.WindowsPrincipal($id)
+    return $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-# Taskleiste: Suchfeld ausblenden
-Write-Log "Konfiguriere Taskleiste..."
-try {
-    Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Search" -Name "SearchboxTaskbarMode" -Value 0
-    Write-Log "✓ Taskleiste konfiguriert"
-} catch {
-    Write-Log "✗ Fehler bei Taskleisten-Konfiguration"
+if (-not (Test-IsAdministrator)) {
+    Log "Script lauft nicht als Administrator. Versuche Neustart..."
+    # Versuche verlässliche Pfadbestimmung des aktuell ausgeführten Skripts
+    $scriptPath = $PSCommandPath
+    if (-not $scriptPath) {
+        $scriptPath = $MyInvocation.MyCommand.Path
+    }
+    if (-not $scriptPath) {
+        Log "Konnte Skriptpfad nicht ermitteln. Bitte Skript aus Datei ausführen."
+        exit 1
+    }
+    $argList = @("-NoProfile","-ExecutionPolicy","Bypass","-File",$scriptPath)
+    Start-Process -FilePath "powershell" -ArgumentList $argList -Verb RunAs -WindowStyle Normal
+    exit 0
 }
 
-# Windows Update auf "Benachrichtigen vor Download" setzen
-Write-Log "Konfiguriere Windows Update..."
-try {
-    Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" -Name "AUOptions" -Value 2 -Force -ErrorAction SilentlyContinue
-    Write-Log "✓ Windows Update konfiguriert"
-} catch {
-    Write-Log "⚠ Windows Update-Einstellung übersprungen (erfordert Admin-Rechte)"
+# Optional: bessere Append-Performance bei vielen Einträgen
+[System.Collections.ArrayList]$results = @()
+
+# --- Installationsfunktion ---
+function Install-App {
+    param ([string]$Name, [string]$PackageID)
+
+    Log "=> Prüfe $Name (ID: $PackageID)..."
+
+    # Timeout-geschützte Prüfung: winget show
+    $proc = Start-Process -FilePath "winget" -ArgumentList @("show","--id",$PackageID,"--exact") -PassThru -WindowStyle Hidden
+    if (-not $proc.WaitForExit(30*1000)) {
+        try { $proc.Kill() } catch {}
+        Log "Winget-Anfrage für $Name hat zu lange gedauert, überspringe..."
+        $results.Add([pscustomobject]@{Name=$Name;Status="Timeout";Message="Winget-Show hing zu lange."}) | Out-Null
+        return
+    }
+
+    if ($proc.ExitCode -ne 0) {
+        $msg = "Paket $PackageID wurde in Winget nicht gefunden."
+        Log $msg
+        $results.Add([pscustomobject]@{Name=$Name;Status="NotFound";Message=$msg}) | Out-Null
+        return
+    }
+
+    # Prüfen ob installiert — lokalitätsunabhängig: auf leere Ausgabe prüfen
+    $listOutput = (& winget list --id $PackageID --exact 2>$null) -join "`n"
+    if ($listOutput -and $listOutput.Trim().Length -gt 0) {
+        $msg = "$Name ist bereits installiert. Überspringe..."
+        Log $msg
+        $results.Add([pscustomobject]@{Name=$Name;Status="AlreadyInstalled";Message=$msg}) | Out-Null
+        return
+    }
+
+    # Installation starten
+    Log "Installiere $Name..."
+    $args = @("install","--id",$PackageID,"--accept-package-agreements","--accept-source-agreements","--exact")
+    if ($UseSilent) { $args += "--silent" }
+
+    $proc = Start-Process -FilePath "winget" -ArgumentList $args -PassThru -WindowStyle Hidden
+    if (-not $proc.WaitForExit(600*1000)) { # 10 Minuten Timeout
+        try { $proc.Kill() } catch {}
+        Log "Installation von $Name hat zu lange gedauert – abgebrochen."
+        $results.Add([pscustomobject]@{Name=$Name;Status="Timeout";Message="Installation zu lange gedauert."}) | Out-Null
+        return
+    }
+
+    if ($proc.ExitCode -eq 0) {
+        $msg = "$Name erfolgreich installiert."
+        Log $msg
+        $results.Add([pscustomobject]@{Name=$Name;Status="Installed";Message=$msg}) | Out-Null
+    } else {
+        $msg = "Fehler bei $Name (ExitCode=$($proc.ExitCode))."
+        Log $msg
+        $results.Add([pscustomobject]@{Name=$Name;Status="Failed";Message=$msg;ExitCode=$proc.ExitCode}) | Out-Null
+    }
 }
 
-# ===== WINDOWS FEATURES =====
+# --- App-Liste ---
+$apps = @(
+    @{Name="Blender"; ID="BlenderFoundation.Blender"},
+    @{Name="Mozilla Firefox"; ID="Mozilla.Firefox"},
+    @{Name="7-Zip"; ID="7zip.7zip"},
+    @{Name="Steam"; ID="Valve.Steam"},
+    @{Name="Godot Engine"; ID="GodotEngine.GodotEngine"},
+    @{Name="Visual Studio 2022 Community"; ID="Microsoft.VisualStudio.2022.Community"}
+)
 
-# Hyper-V deaktivieren (falls nicht benötigt)
-# Write-Log "Deaktiviere Hyper-V..."
-# Disable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V-All -NoRestart
-
-# WSL2 aktivieren (falls benötigt)
-# Write-Log "Aktiviere WSL2..."
-# dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart
-# dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart
-
-# ===== EXPLORER NEUSTARTEN =====
-Write-Log "Starte Explorer neu..."
-try {
-    Stop-Process -Name explorer -Force
-    Start-Sleep -Seconds 2
-    Write-Log "✓ Explorer neugestartet"
-} catch {
-    Write-Log "⚠ Explorer-Neustart übersprungen"
+# --- Hauptlauf ---
+foreach ($app in $apps) {
+    try {
+        Install-App -Name $app.Name -PackageID $app.ID
+    } catch {
+        Log "Unbehandelter Fehler bei $($app.Name): $_"
+        $results.Add([pscustomobject]@{Name=$app.Name;Status="Error";Message=$_.Exception.Message}) | Out-Null
+    }
 }
 
-# ===== ZUSÄTZLICHE KONFIGURATIONEN =====
+# --- Zusammenfassung ---
+Log "`n=== Zusammenfassung ==="
+$results | Format-Table -AutoSize | Out-String | ForEach-Object { Log $_ }
 
-# Desktop-Icons erstellen (Beispiel: Dieser PC, Papierkorb)
-# Write-Log "Erstelle Desktop-Icons..."
-# $path = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\HideDesktopIcons\NewStartPanel"
-# Set-ItemProperty -Path $path -Name "{20D04FE0-3AEA-1069-A2D8-08002B30309D}" -Value 0  # Dieser PC
-# Set-ItemProperty -Path $path -Name "{645FF040-5081-101B-9F08-00AA002F954E}" -Value 0  # Papierkorb
-
-# Performance-Einstellungen
-Write-Log "Optimiere Performance-Einstellungen..."
-try {
-    # Visuelle Effekte auf Performance optimieren
-    Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" -Name "VisualFXSetting" -Value 2
-    Write-Log "✓ Performance optimiert"
-} catch {
-    Write-Log "⚠ Performance-Optimierung übersprungen"
+if ($CreateLog) {
+    "`n==== Installation beendet: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') ====`n" | Out-File -FilePath $LogFile -Encoding utf8 -Append
+    Log "Log-Datei gespeichert unter: $LogFile"
 }
 
-Write-Log "=== Windows Konfiguration abgeschlossen ==="
-Write-Log "Log-Datei: $logFile"
-
-# Script löscht sich selbst
-Start-Sleep -Seconds 2
-Remove-Item $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue
+Log "Fertig. Bitte Ausgabe oder Log pruefen."
+Start-Sleep -Seconds 3
