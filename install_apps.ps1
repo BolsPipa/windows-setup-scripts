@@ -6,6 +6,10 @@ Write-Host "Starte Software-Installation..." -ForegroundColor Cyan
 
 # Sicherheitsprotokoll für GitHub/HTTPS
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+# Deaktiviert Microsoft Store als Quelle (verhindert Interaktivität)
+try {
+    winget source remove msstore -y *> $null 2>&1
+} catch {}
 
 # --- Einstellungen ---
 $UseSilent = $false
