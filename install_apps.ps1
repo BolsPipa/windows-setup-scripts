@@ -1,9 +1,8 @@
 # ============================================
-# install_apps.ps1 – Programme automatisch installieren (stabil + Setup-kompatibel)
+# install_apps.ps1 – Automatische Installation (stabil + Setup-kompatibel)
 # ============================================
 
 Write-Host "Starte Software-Installation..." -ForegroundColor Cyan
-
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 # --- Einstellungen ---
@@ -23,25 +22,30 @@ function Log {
     if ($CreateLog) { $Text | Out-File -FilePath $LogFile -Encoding utf8 -Append }
 }
 
-# --- Winget initialisieren ---
-Log "Initialisiere Winget-Datenbank..."
+# --- Winget-Initialisierung (nicht-blockierend) ---
+Log "Initialisiere Winget-Datenbank (nicht-blockierend)..."
 try {
-    winget source remove msstore -y *> $null 2>&1
-    winget source update *> $null 2>&1
-    $null = winget list 2>$null
-    Log "Winget-Datenbank initialisiert."
-}
-catch {
+    # Store-Quelle entfernen, damit keine Lizenzabfrage kommt
+    Start-Job -ScriptBlock {
+        try {
+            winget source remove msstore -y *> $null 2>&1
+            winget source reset --force *> $null 2>&1
+            winget source update *> $null 2>&1
+        } catch {}
+    } | Out-Null
+    Start-Sleep -Seconds 5
+    Log "Winget-Initialisierung im Hintergrund gestartet."
+} catch {
     Log "⚠️ Fehler bei Winget-Initialisierung: $_"
 }
 
-# --- Prüfen, ob Winget vorhanden ist ---
+# --- Prüfen ob Winget verfügbar ---
 if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
     Log "❌ Winget ist nicht verfügbar. Stelle sicher, dass 'App Installer' installiert ist."
     exit 1
 }
 
-# --- Adminrechte prüfen (optional) ---
+# --- Adminrechte prüfen ---
 function Test-IsAdministrator {
     $id = [Security.Principal.WindowsIdentity]::GetCurrent()
     $p = New-Object Security.Principal.WindowsPrincipal($id)
@@ -57,22 +61,21 @@ if (-not (Test-IsAdministrator)) {
 
 $results = @()
 
-# --- App-Installation ---
+# --- Installationsfunktion ---
 function Install-App {
     param ([string]$Name, [string]$PackageID)
 
     Log "=> Prüfe $Name (ID: $PackageID)..."
 
-    # Timeout für 'winget show'
+    # Timeout-geschützte Prüfung
     $proc = Start-Process -FilePath "winget" -ArgumentList @("show","--id",$PackageID,"--exact") -PassThru -WindowStyle Hidden
     if (-not $proc.WaitForExit(30*1000)) {
         $proc.Kill()
-        Log "⚠️ Winget-Anfrage für $Name hat zu lange gedauert – überspringe."
+        Log "⚠️ Winget-Anfrage für $Name hat zu lange gedauert, überspringe..."
         $results += [pscustomobject]@{Name=$Name;Status="Timeout";Message="Winget-Show hing zu lange."}
         return
     }
 
-    # Paketprüfung
     if ($proc.ExitCode -ne 0) {
         $msg = "❌ Paket $PackageID wurde in Winget nicht gefunden."
         Log $msg
@@ -89,6 +92,7 @@ function Install-App {
         return
     }
 
+    # Installation starten
     Log "⬇️  Installiere $Name..."
     $args = @("install","--id",$PackageID,"--accept-package-agreements","--accept-source-agreements","--exact")
     if ($UseSilent) { $args += "--silent" }
