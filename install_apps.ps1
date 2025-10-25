@@ -161,5 +161,5 @@ if ($CreateLog) {
     Log "Log-Datei gespeichert unter: $LogFile"
 }
 
-Log "Fertig. Bitte Ausgabe oder Log pruefen."
+Log 'Fertig. Bitte Ausgabe oder Log pruefen.'
 Start-Sleep -Seconds 3
