@@ -21,7 +21,7 @@ function Log {
 }
 
 if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-    Log "Winget ist nicht verfügbar. Stelle sicher, dass 'App Installer' installiert ist."
+    Log "Winget ist nicht verfuegbar. Stelle sicher, dass 'App Installer' installiert ist."
     exit 1
 }
 
@@ -32,7 +32,7 @@ function Test-IsAdministrator {
     return $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 if (-not (Test-IsAdministrator)) {
-    Log "Script läuft nicht als Administrator. Versuche Neustart..."
+    Log "Script lauft nicht als Administrator. Versuche Neustart..."
     $arg = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""
     Start-Process -FilePath "powershell" -ArgumentList $arg -Verb RunAs -WindowStyle Normal
     exit 0
@@ -42,7 +42,7 @@ $results = @()
 
 function Install-App {
     param ([string]$Name, [string]$PackageID)
-    Log "=> Prüfe $Name (ID: $PackageID)..."
+    Log "=> Pruefe $Name (ID: $PackageID)..."
     & winget show --id $PackageID --exact *> $null 2>&1
     if ($LASTEXITCODE -ne 0) {
         $msg = "Paket $PackageID wurde in winget nicht gefunden."
