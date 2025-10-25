@@ -128,8 +128,7 @@ $apps = @(
     @{Name="7-Zip"; ID="7zip.7zip"},
     @{Name="Steam"; ID="Valve.Steam"},
     @{Name="Godot Engine"; ID="GodotEngine.GodotEngine"},
-    @{Name="Visual Studio 2022 Community"; ID="Microsoft.VisualStudio.2022.Community"}
-)
+    @{Name="Visual Studio Code"; ID="Microsoft.VisualStudioCode"})
 
 # --- Hauptlauf ---
 Log "`n=== Starte Installation von $($apps.Count) Programmen ===`n"
