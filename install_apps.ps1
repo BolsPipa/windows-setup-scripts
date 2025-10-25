@@ -69,14 +69,7 @@ try {
     $null = winget source update 2>&1
     Start-Sleep -Seconds 5
     
-    # Test-Abfrage
-    Log "Teste Winget-Bereitschaft..."
-    $testOutput = winget search Microsoft.PowerToys --exact 2>&1
-    if ($LASTEXITCODE -eq 0) {
-        Log "OK: Winget ist bereit!"
-    } else {
-        Log "WARNUNG: Winget-Test fehlgeschlagen, fahre trotzdem fort..."
-    }
+    Log "OK: Winget-Initialisierung abgeschlossen!"
     
 } catch {
     Log "WARNUNG: Fehler bei Winget-Initialisierung: $($_.Exception.Message)"
