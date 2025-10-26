@@ -123,8 +123,12 @@ function Install-App {
 
 # --- App-Liste ---
 $apps = @(
-    @{Name="Mozilla Firefox"; ID="Mozilla.Firefox"; Scope=""},
-    @{Name="7-Zip"; ID="7zip.7zip"; Scope=""},
+    @{Name="Epic Games Launcher"; ID="EpicGames.EpicGamesLauncher"; Scope=""},
+    @{Name="Blender"; ID="BlenderFoundation.Blender"; Scope=""},
+    @{Name="Godot Engine"; ID="GodotEngine.GodotEngine"; Scope="machine"},
+    @{Name="Python 3.12"; ID="Python.Python.3.12"; Scope=""},
+    @{Name="Audacity"; ID="Audacity.Audacity"; Scope=""},
+    @{Name="Adobe Acrobat Reader"; ID="Adobe.Acrobat.Reader.64-bit"; Scope=""},
     @{Name="VLC Media Player"; ID="VideoLAN.VLC"; Scope=""}
 )
 
