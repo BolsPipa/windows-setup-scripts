@@ -1,5 +1,5 @@
 # ============================================
-# install_apps.ps1 - Automatische Installation
+# nstall-essentials.ps1 - Automatische Installation
 # ============================================
 
 Write-Host "Starte Software-Installation..." -ForegroundColor Cyan
