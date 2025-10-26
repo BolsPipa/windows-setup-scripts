@@ -1,5 +1,5 @@
 # ============================================
-# install-basics.ps1 - Automatische Installation
+# install-dev.ps1 - Automatische Installation
 # ============================================
 
 Write-Host "Starte Software-Installation..." -ForegroundColor Cyan
