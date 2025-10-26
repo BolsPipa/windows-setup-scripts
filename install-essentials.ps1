@@ -123,12 +123,15 @@ function Install-App {
 
 # --- App-Liste ---
 $apps = @(
-    @{Name="Blender"; ID="BlenderFoundation.Blender"},
-    @{Name="Mozilla Firefox"; ID="Mozilla.Firefox"},
-    @{Name="7-Zip"; ID="7zip.7zip"},
-    @{Name="Steam"; ID="Valve.Steam"},
-    @{Name="Godot Engine"; ID="GodotEngine.GodotEngine"},
-    @{Name="Visual Studio Code"; ID="Microsoft.VisualStudioCode"})
+    @{Name="Mozilla Firefox"; ID="Mozilla.Firefox"; Scope=""},
+    @{Name="7-Zip"; ID="7zip.7zip"; Scope=""},
+    @{Name="Notepad++"; ID="Notepad++.Notepad++"; Scope=""},
+    @{Name="Steam"; ID="Valve.Steam"; Scope=""},
+    @{Name="CPU-Z"; ID="CPUID.CPU-Z"; Scope=""},
+    @{Name="OBS Studio"; ID="OBSProject.OBSStudio"; Scope=""},
+    @{Name="VLC Media Player"; ID="VideoLAN.VLC"; Scope=""},
+    @{Name="LibreOffice"; ID="TheDocumentFoundation.LibreOffice"; Scope=""},
+    @{Name="Visual Studio Code"; ID="Microsoft.VisualStudioCode"; Scope=""})
 
 # --- Hauptlauf ---
 Log "`n=== Starte Installation von $($apps.Count) Programmen ===`n"
